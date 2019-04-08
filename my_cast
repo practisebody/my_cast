@@ -1,0 +1,183 @@
+#pragma once
+
+template<class A, class B>
+inline A my_cast(const B& b);
+
+namespace detail
+{
+// also a sample implementation
+template<typename A, typename B>
+inline B my_cast_impl(const A& a, B*)
+{
+	return static_cast<B>(a);
+}
+
+// std::string <=> primitives
+__if_exists(std::string)
+{
+inline bool my_cast_impl(const std::string& p, bool*)
+{
+	return my_cast<int>(p);
+}
+
+inline int my_cast_impl(const std::string& p, int*)
+{
+	if (p.compare("false") == 0 || p.compare("False") == 0)
+		return 0;
+	else if (p.compare("true") == 0 || p.compare("True") == 0)
+		return 1;
+	return stoi(p);
+}
+
+inline size_t my_cast_impl(const std::string& p, size_t*)
+{
+	return stoi(p);
+}
+
+inline long my_cast_impl(const std::string& p, long*)
+{
+	return stol(p);
+}
+
+inline long long my_cast_impl(const std::string& p, long long*)
+{
+	return stoll(p);
+}
+
+inline unsigned long my_cast_impl(const std::string& p, unsigned long*)
+{
+	return stoul(p);
+}
+
+inline unsigned long long my_cast_impl(const std::string& p, unsigned long long*)
+{
+	return stoull(p);
+}
+
+inline float my_cast_impl(const std::string& p, float*)
+{
+	return stof(p);
+}
+
+inline double my_cast_impl(const std::string& p, double*)
+{
+	return stod(p);
+}
+
+inline long double my_cast_impl(const std::string& p, long double*)
+{
+	return stold(p);
+}
+} //__if_exists(std::string)
+
+// std::vector <=> std::vector
+__if_exists(std::vector)
+{
+template<class A, class B>
+inline std::vector<B> my_cast_impl(const std::vector<A>& a, std::vector<B>*)
+{
+	if constexpr (std::is_default_constructible_v<B>)
+	{
+		std::vector<B> b(a.size());
+		for (size_t i = 0; i < a.size(); ++i)
+			b[i] = my_cast<B>(a[i]);
+		return b;
+	}
+	else
+	{
+		std::vector<B> b;
+		for (size_t i = 0; i < a.size(); ++i)
+			b.emplace_back(my_cast<B>(a[i]));
+		return b;
+	}
+}
+} // __if_exists(std::vector)
+
+// cv <=> Eigen
+__if_exists(cv) {
+__if_exists(Eigen) {
+inline Eigen::Vector2f my_cast_impl(const cv::Point2f& p, Eigen::Vector2f*)
+{
+	return Eigen::Vector2f(p.x, p.y);
+}
+
+inline cv::Point2f my_cast_impl(const Eigen::Vector2f& p, cv::Point2f*)
+{
+	return cv::Point2f(p.x(), p.y());
+}
+
+inline Eigen::Vector3f my_cast_impl(const cv::Point3f& p, Eigen::Vector3f*)
+{
+	return Eigen::Vector3f(p.x, p.y, p.z);
+}
+
+inline cv::Point3f my_cast_impl(const Eigen::Vector3f& p, cv::Point3f*)
+{
+	return cv::Point3f(p.x(), p.y(), p.z());
+}
+
+// cv::Mat is row major
+// Eigen::Matrix is column major
+template<typename T, int Rows, int Cols>
+inline cv::Mat my_cast_impl(const Eigen::Matrix<T, Rows, Cols>& m, cv::Mat*)
+{
+	int type;
+	if constexpr (std::is_same_v<T, uchar>)
+		type = CV_8U;
+	if constexpr (std::is_same_v<T, char>)
+		type = CV_8S;
+	if constexpr (std::is_same_v<T, ushort>)
+		type = CV_16U;
+	if constexpr (std::is_same_v<T, short>)
+		type = CV_16S;
+	if constexpr (std::is_same_v<T, int>)
+		type = CV_32S;
+	if constexpr (std::is_same_v<T, float>)
+		type = CV_32F;
+	if constexpr (std::is_same_v<T, double>)
+		type = CV_64F;
+	cv::Mat ret(Rows, Cols, type);
+	for (int y = 0; y < Cols; ++y)
+		for (int x = 0; x < Rows; ++x)
+			ret.at<T>(x, y) = m(x, y);
+	return ret;
+}
+
+template<typename T, int Rows, int Cols>
+inline Eigen::Matrix<T, Rows, Cols> my_cast_impl(const cv::Mat& m, Eigen::Matrix<T, Rows, Cols>*)
+{
+	Eigen::Matrix<T, Rows, Cols> ret;
+	for (int y = 0; y < Cols; ++y)
+		for (int x = 0; x < Rows; ++x)
+			ret(x, y) = m.at<T>(x, y);
+	return ret;
+}
+} //__if_exists(cv)
+} //__if_exists(Eigen)
+
+__if_exists(std::pair) {
+__if_exists(cv) {
+__if_exists(Sophus) {
+template<typename T>
+inline Sophus::SE3<T> my_cast_impl(const std::pair<cv::Mat, cv::Mat>& rt, Sophus::SE3<T>*)
+{
+	const auto& [r, t] = rt;
+	return Sophus::SE3<T>(Sophus::SO3<T>::exp(my_cast<Eigen::Matrix<T, 3, 1>>(r)), my_cast<Eigen::Matrix<T, 3, 1>>(t));
+}
+
+template<typename T>
+inline std::pair<cv::Mat, cv::Mat> my_cast_impl(const Sophus::SE3<T>& se3, std::pair<cv::Mat, cv::Mat>*)
+{
+	return { my_cast<cv::Mat>(se3.so3().log()), my_cast<cv::Mat>(se3.translation()) };
+}
+} // __if_exists(std::pair)
+} // __if_exists(cv)
+} // __if_exists(Sophus)
+
+} // namespace detail
+
+template<class A, class B>
+inline A my_cast(const B& b)
+{
+	return detail::my_cast_impl(b, static_cast<A*>(nullptr));
+}
